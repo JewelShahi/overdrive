@@ -10,36 +10,24 @@
     speed: 1,
   };
 
-  const host = location.hostname;
-
-  /*
-   * Persistent site default
-   *
-   * Example:
-   * overdrive:youtube.com
-   *
-   * This is only the fallback for a new tab
-   */
-  const siteStorageKey =
-    `overdrive:${host}`;
-
   /*
    * Current tab's settings
-   *
-   * This is intentionally kept in memory
-   *
-   * Refreshing a page does not destroy the
-   * extension's session storage, so the tab
-   * can restore its own settings
    */
   let state = {
-    volume: DEFAULTS.volume,
-    speed: DEFAULTS.speed,
+    volume:
+      DEFAULTS.volume,
+
+    speed:
+      DEFAULTS.speed,
   };
 
   let initialized = false;
 
+  let currentHost = null;
+
   let audioCtx = null;
+
+  let audioUnlocked = false;
 
   /*
    * Each media element gets exactly one:
@@ -52,208 +40,6 @@
 
   /*
    * --------------------------------------------------
-   * Storage helpers
-   * --------------------------------------------------
-   */
-
-  function readSiteDefaults() {
-    try {
-      const raw =
-        localStorage.getItem(
-          siteStorageKey
-        );
-
-      if (!raw) {
-        return {
-          ...DEFAULTS,
-        };
-      }
-
-      const saved =
-        JSON.parse(raw);
-
-      return {
-        volume:
-          clampVolume(
-            saved.volume
-          ),
-
-        speed:
-          clampSpeed(
-            saved.speed
-          ),
-      };
-    } catch (error) {
-      return {
-        ...DEFAULTS,
-      };
-    }
-  }
-
-  function writeSiteDefaults() {
-    try {
-      localStorage.setItem(
-        siteStorageKey,
-        JSON.stringify({
-          volume: state.volume,
-          speed: state.speed,
-        })
-      );
-    } catch (error) {
-      /*
-       * Ignore storage errors
-       */
-    }
-  }
-
-  /*
-   * --------------------------------------------------
-   * Session storage
-   * --------------------------------------------------
-   *
-   * chrome.storage.session survives page navigation
-   * and refreshes while the browser is running
-   *
-   * It is cleared when Chrome is closed/restarted
-   *
-   * The key includes the current tab ID so each
-   * tab gets independent settings
-   */
-
-  function getSessionKey(tabId) {
-    return `tab:${tabId}`;
-  }
-
-  async function readTabState() {
-    /*
-     * Content scripts normally don't have access to
-     * the tab ID directly, so ask the background/service
-     * worker for it
-     */
-    try {
-      const response =
-        await chrome.runtime.sendMessage({
-          type:
-            "overdrive:getTabId",
-        });
-
-      if (
-        !response ||
-        typeof response.tabId !==
-          "number"
-      ) {
-        return false;
-      }
-
-      const key =
-        getSessionKey(
-          response.tabId
-        );
-
-      const result =
-        await chrome.storage.session.get(
-          key
-        );
-
-      if (
-        result &&
-        result[key]
-      ) {
-        const saved =
-          result[key];
-
-        state = {
-          volume:
-            clampVolume(
-              saved.volume
-            ),
-
-          speed:
-            clampSpeed(
-              saved.speed
-            ),
-        };
-
-        return true;
-      }
-
-      /*
-       * No tab-specific settings yet
-       *
-       * Start from this site's default
-       */
-      state =
-        readSiteDefaults();
-
-      await writeTabState(
-        response.tabId
-      );
-
-      return true;
-    } catch (error) {
-      /*
-       * If session storage or the service worker
-       * is unavailable, fall back to site defaults
-       */
-      state =
-        readSiteDefaults();
-
-      return false;
-    }
-  }
-
-  async function writeTabState(tabId) {
-    if (
-      typeof tabId !==
-      "number"
-    ) {
-      return;
-    }
-
-    try {
-      const key =
-        getSessionKey(tabId);
-
-      await chrome.storage.session.set({
-        [key]: {
-          volume:
-            state.volume,
-
-          speed:
-            state.speed,
-        },
-      });
-    } catch (error) {
-      /*
-       * Ignore session-storage errors
-       */
-    }
-  }
-
-  async function getCurrentTabId() {
-    try {
-      const response =
-        await chrome.runtime.sendMessage({
-          type:
-            "overdrive:getTabId",
-        });
-
-      if (
-        response &&
-        typeof response.tabId ===
-          "number"
-      ) {
-        return response.tabId;
-      }
-    } catch (error) {
-      // Ignore.
-    }
-
-    return null;
-  }
-
-  /*
-   * --------------------------------------------------
    * Value helpers
    * --------------------------------------------------
    */
@@ -263,7 +49,9 @@
       Number(value);
 
     if (
-      !Number.isFinite(value)
+      !Number.isFinite(
+        value
+      )
     ) {
       return DEFAULTS.volume;
     }
@@ -282,7 +70,9 @@
       Number(value);
 
     if (
-      !Number.isFinite(value)
+      !Number.isFinite(
+        value
+      )
     ) {
       return DEFAULTS.speed;
     }
@@ -298,6 +88,170 @@
     );
   }
 
+  function normalizeState(value) {
+    return {
+      volume:
+        clampVolume(
+          value?.volume
+        ),
+
+      speed:
+        clampSpeed(
+          value?.speed
+        ),
+    };
+  }
+
+  /*
+   * --------------------------------------------------
+   * Storage
+   * --------------------------------------------------
+   */
+
+  function getHost() {
+    try {
+      return (
+        new URL(
+          location.href
+        ).hostname ||
+        null
+      );
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function getSiteKey(host) {
+    return `overdrive:default:${host}`;
+  }
+
+  /*
+   * Site defaults live in localStorage
+   *
+   * These survive browser restarts
+   */
+  function readSiteDefault() {
+    if (!currentHost) {
+      return {
+        ...DEFAULTS,
+      };
+    }
+
+    try {
+      const saved =
+        localStorage.getItem(
+          getSiteKey(
+            currentHost
+          )
+        );
+
+      if (!saved) {
+        return {
+          ...DEFAULTS,
+        };
+      }
+
+      return normalizeState(
+        JSON.parse(saved)
+      );
+    } catch (error) {
+      return {
+        ...DEFAULTS,
+      };
+    }
+  }
+
+  function writeSiteDefault() {
+    if (!currentHost) {
+      return;
+    }
+
+    try {
+      localStorage.setItem(
+        getSiteKey(
+          currentHost
+        ),
+        JSON.stringify(
+          normalizeState(
+            state
+          )
+        )
+      );
+    } catch (error) {
+      // Ignore storage errors
+    }
+  }
+
+  /*
+   * Temporary state lives in sessionStorage
+   *
+   * sessionStorage is isolated per tab and origin
+   *
+   * This keeps:
+   *
+   * - different tabs independent
+   * - same-tab episode changes persistent
+   * - different sites separated
+   */
+  function readTabState() {
+    try {
+      const saved =
+        sessionStorage.getItem(
+          "overdrive:state"
+        );
+
+      if (!saved) {
+        return null;
+      }
+
+      return normalizeState(
+        JSON.parse(saved)
+      );
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function writeTabState() {
+    try {
+      sessionStorage.setItem(
+        "overdrive:state",
+        JSON.stringify(
+          normalizeState(
+            state
+          )
+        )
+      );
+    } catch (error) {
+      // Ignore storage errors
+    }
+  }
+
+  /*
+   * Restore the current tab's state
+   *
+   * If this tab already has temporary state,
+   * restore it
+   *
+   * Otherwise use the site's saved default
+   */
+  function restoreState() {
+    const saved =
+      readTabState();
+
+    if (saved) {
+      state =
+        saved;
+
+      return;
+    }
+
+    state =
+      readSiteDefault();
+
+    writeTabState();
+  }
+
   /*
    * --------------------------------------------------
    * Web Audio
@@ -305,21 +259,57 @@
    */
 
   function getAudioContext() {
-    if (!audioCtx) {
-      audioCtx =
-        new AudioContext();
+    if (audioCtx) {
+      return audioCtx;
     }
 
-    if (
-      audioCtx.state ===
-      "suspended"
-    ) {
-      audioCtx.resume().catch(
-        () => {}
-      );
+    /*
+     * Do not create AudioContext automatically
+     * before a user gesture
+     */
+    if (!audioUnlocked) {
+      return null;
+    }
+
+    try {
+      audioCtx =
+        new AudioContext();
+    } catch (error) {
+      audioCtx = null;
     }
 
     return audioCtx;
+  }
+
+  async function unlockAudio() {
+    audioUnlocked = true;
+
+    const ctx =
+      getAudioContext();
+
+    if (!ctx) {
+      return false;
+    }
+
+    if (
+      ctx.state ===
+      "suspended"
+    ) {
+      try {
+        await ctx.resume();
+      } catch (error) {
+        return false;
+      }
+    }
+
+    if (
+      ctx.state !==
+      "running"
+    ) {
+      return false;
+    }
+
+    return true;
   }
 
   function rig(el) {
@@ -331,13 +321,17 @@
     }
 
     /*
-     * Some media elements may not be ready
-     * to be connected yet
+     * Do not create Web Audio until
+     * the page has received a user gesture
      */
-    try {
-      const ctx =
-        getAudioContext();
+    const ctx =
+      getAudioContext();
 
+    if (!ctx) {
+      return;
+    }
+
+    try {
       const source =
         ctx.createMediaElementSource(
           el
@@ -346,7 +340,9 @@
       const gain =
         ctx.createGain();
 
-      source.connect(gain);
+      source.connect(
+        gain
+      );
 
       gain.connect(
         ctx.destination
@@ -366,11 +362,7 @@
       gain.gain.value =
         state.volume / 100;
 
-      el.playbackRate =
-        state.speed;
-
-      el.defaultPlaybackRate =
-        state.speed;
+      applySpeed(el);
     } catch (error) {
       /*
        * MediaElementSource can fail for certain
@@ -399,35 +391,40 @@
     const connection =
       rigged.get(el);
 
-    if (connection) {
+    if (!connection) {
       /*
-       * Overdrive is an independent multiplier
+       * Do not modify native/player volume
        *
-       * 100% = 1.0x
-       * 150% = 1.5x
-       * 200% = 2.0x
-       * 250% = 2.5x
+       * Without Web Audio we cannot amplify the
+       * media above its native volume safely
        */
-      connection.gain.gain.value =
-        state.volume / 100;
-
       return;
     }
 
     /*
-     * Fallback if Web Audio could not be attached
+     * Overdrive is an independent multiplier
      *
-     * Native volume cannot exceed 100%
+     * 100% = 1.0x
+     * 150% = 1.5x
+     * 200% = 2.0x
+     * 250% = 2.5x
      */
-    el.volume =
-      Math.min(
-        1,
-        state.volume / 100
-      );
+    connection.gain.gain.value =
+      state.volume / 100;
   }
 
   function applySpeed(el) {
+    if (!el) {
+      return;
+    }
+
     try {
+      /*
+       * Always restore the requested speed
+       *
+       * This is important for sites such as ReAnime
+       * that replace the player when changing episodes
+       */
       el.playbackRate =
         state.speed;
 
@@ -443,10 +440,21 @@
       return;
     }
 
+    /*
+     * Speed does not require Web Audio
+     *
+     * Apply it immediately
+     */
+    applySpeed(el);
+
+    /*
+     * Volume amplification requires Web Audio
+     *
+     * rig() does nothing until audio is unlocked
+     */
     rig(el);
 
     applyVolume(el);
-    applySpeed(el);
   }
 
   function applyAll() {
@@ -457,22 +465,83 @@
 
   /*
    * --------------------------------------------------
-   * Save current tab state
+   * Media event protection
    * --------------------------------------------------
+   *
+   * Streaming sites can reset playbackRate when:
+   *
+   * - metadata loads
+   * - playback starts
+   * - a new episode loads
+   * - a new media element is created
    */
 
-  async function saveCurrentTabState() {
-    const tabId =
-      await getCurrentTabId();
+  function watchMedia(el) {
+    if (!el) {
+      return;
+    }
+
+    applyToMedia(el);
 
     if (
-      tabId === null
+      el.dataset.overdriveWatched ===
+      "true"
     ) {
       return;
     }
 
-    await writeTabState(
-      tabId
+    el.dataset.overdriveWatched =
+      "true";
+
+    el.addEventListener(
+      "loadedmetadata",
+      () => {
+        applySpeed(el);
+        applyVolume(el);
+      }
+    );
+
+    el.addEventListener(
+      "loadeddata",
+      () => {
+        applySpeed(el);
+        applyVolume(el);
+      }
+    );
+
+    el.addEventListener(
+      "canplay",
+      () => {
+        applySpeed(el);
+        applyVolume(el);
+      }
+    );
+
+    el.addEventListener(
+      "play",
+      () => {
+        applySpeed(el);
+        applyVolume(el);
+      }
+    );
+
+    el.addEventListener(
+      "ratechange",
+      () => {
+        /*
+         * Only restore the value when the site
+         * changed it away from our setting
+         */
+        if (
+          Math.abs(
+            el.playbackRate -
+              state.speed
+          ) > 0.001
+        ) {
+          el.playbackRate =
+            state.speed;
+        }
+      }
     );
   }
 
@@ -482,44 +551,84 @@
    * --------------------------------------------------
    */
 
-  async function initialize() {
+  function initialize() {
     if (initialized) {
       return;
     }
 
+    currentHost =
+      getHost();
+
+    restoreState();
+
     initialized = true;
 
     /*
-     * Restore this tab's previous settings
+     * Apply settings immediately
      *
-     * If none exist, use this site's default
-     */
-    await readTabState();
-
-    /*
-     * Find media that already exists
+     * This works even when there is currently
+     * no player
+     *
+     * Speed will automatically apply when a
+     * player appears later
      */
     applyAll();
   }
 
   /*
    * --------------------------------------------------
+   * Page user interaction
+   * --------------------------------------------------
+   *
+   * Chrome requires Web Audio to be activated
+   * after a user gesture
+   */
+
+  async function activateFromPageGesture() {
+    const activated =
+      await unlockAudio();
+
+    if (activated) {
+      applyAll();
+    }
+  }
+
+  document.addEventListener(
+    "pointerdown",
+    activateFromPageGesture,
+    {
+      capture: true,
+      passive: true,
+    }
+  );
+
+  document.addEventListener(
+    "keydown",
+    activateFromPageGesture,
+    {
+      capture: true,
+      passive: true,
+    }
+  );
+
+  document.addEventListener(
+    "touchstart",
+    activateFromPageGesture,
+    {
+      capture: true,
+      passive: true,
+    }
+  );
+
+  /*
+   * --------------------------------------------------
    * Mutation observer
    * --------------------------------------------------
    *
-   * YouTube constantly creates/removes media elements
+   * Streaming sites constantly create/remove media
    *
-   * We do NOT reset settings when that happens
-   *
-   * Therefore changing:
-   *
-   * /watch?v=AAAA
-   *
-   * to:
-   *
-   * /watch?v=BBBB
-   *
-   * keeps the same tab state
+   * We keep the current tab's settings and
+   * automatically apply them to new players
    */
 
   const observer =
@@ -548,7 +657,7 @@
                 "video, audio"
               )
             ) {
-              applyToMedia(
+              watchMedia(
                 node
               );
             }
@@ -561,30 +670,33 @@
                 "video, audio"
               )
               .forEach(
-                applyToMedia
+                watchMedia
               );
           }
         }
       }
     );
 
-  observer.observe(
-    document.documentElement ||
-      document,
-    {
-      childList: true,
-      subtree: true,
-    }
-  );
+  if (document.documentElement) {
+    observer.observe(
+      document.documentElement,
+      {
+        childList: true,
+        subtree: true,
+      }
+    );
+  }
 
   /*
    * Safety scan
    *
-   * This catches media elements that YouTube creates
-   * in unusual ways that MutationObserver may miss
+   * This catches media elements created in
+   * unusual ways by streaming sites
    */
   setInterval(() => {
-    applyAll();
+    allMedia().forEach(
+      watchMedia
+    );
   }, 1000);
 
   /*
@@ -607,12 +719,40 @@
       }
 
       /*
+       * Activate Web Audio
+       *
+       * This does not require a player to exist
+       */
+      if (
+        message.type ===
+        "overdrive:activate"
+      ) {
+        unlockAudio().then(
+          (activated) => {
+            if (activated) {
+              applyAll();
+            }
+
+            sendResponse({
+              activated,
+            });
+          }
+        );
+
+        return true;
+      }
+
+      /*
        * Get current state
+       *
+       * This works even when there is no player
        */
       if (
         message.type ===
         "overdrive:getState"
       ) {
+        initialize();
+
         sendResponse({
           volume:
             state.volume,
@@ -626,30 +766,40 @@
 
       /*
        * Set volume
+       *
+       * This changes the Overdrive multiplier only
+       *
+       * It does NOT change the site's native volume
        */
       if (
         message.type ===
         "overdrive:setVolume"
       ) {
+        initialize();
+
         state.volume =
           clampVolume(
             message.value
           );
 
-        applyAll();
-
         /*
-         * Save as this tab's state
+         * Save for this tab
          */
-        saveCurrentTabState();
+        writeTabState();
 
         /*
-         * Also update this site's default
+         * Save as the site's default
+         * for future tabs
+         */
+        writeSiteDefault();
+
+        /*
+         * Apply immediately if a player exists
          *
-         * This means a newly opened tab can use
-         * the most recently selected site setting
+         * If there is no player, the state is still
+         * saved and will be applied when one appears
          */
-        writeSiteDefaults();
+        applyAll();
 
         sendResponse({
           volume:
@@ -664,27 +814,37 @@
 
       /*
        * Set speed
+       *
+       * Speed works even when there is no player
        */
       if (
         message.type ===
         "overdrive:setSpeed"
       ) {
+        initialize();
+
         state.speed =
           clampSpeed(
             message.value
           );
 
+        /*
+         * Save for this tab
+         */
+        writeTabState();
+
+        /*
+         * Save as the site's default
+         * for future tabs
+         */
+        writeSiteDefault();
+
+        /*
+         * If there is no player, nothing is wrong
+         *
+         * The setting remains stored
+         */
         applyAll();
-
-        /*
-         * Save as this tab's state
-         */
-        saveCurrentTabState();
-
-        /*
-         * Update site default
-         */
-        writeSiteDefaults();
 
         sendResponse({
           volume:
@@ -698,27 +858,52 @@
       }
 
       /*
-       * Reset this tab
+       * Reset this tab only
        *
-       * Reset means return the current tab
-       * to the site's normal defaults
+       * This MUST work even if there is no player
+       *
+       * 100% volume
+       * 1x speed
+       *
+       * Site default remains unchanged
        */
       if (
         message.type ===
         "overdrive:reset"
       ) {
-        state = {
-          ...DEFAULTS,
-        };
-
-        applyAll();
-
-        saveCurrentTabState();
+        initialize();
 
         /*
-         * Reset the site's default too
+         * Reset the state itself first
+         *
+         * A player is NOT required
          */
-        writeSiteDefaults();
+        state = {
+          volume:
+            DEFAULTS.volume,
+
+          speed:
+            DEFAULTS.speed,
+        };
+
+        /*
+         * Save the reset state for this tab
+         *
+         * This is important when there is no player
+         *
+         * If a player appears later, it will use
+         * 100% / 1x
+         */
+        writeTabState();
+
+        /*
+         * IMPORTANT:
+         *
+         * Do NOT call writeSiteDefault()
+         *
+         * Reset only affects this tab
+         */
+        applyAll();
 
         sendResponse({
           volume:
@@ -734,7 +919,13 @@
   );
 
   /*
-   * Initialize
+   * --------------------------------------------------
+   * Start
+   * --------------------------------------------------
+   *
+   * Initialize immediately
+   *
+   * No player is required
    */
   initialize();
 })();
