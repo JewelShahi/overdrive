@@ -1,274 +1,680 @@
 (() => {
-  const DEFAULT_VOLUME = 100;
-  const DEFAULT_SPEED = 1;
+  const MIN_VOL = 0;
+  const MAX_VOL = 250;
 
-  const volumeSlider =
-    document.getElementById("volumeSlider");
+  const MIN_SPEED = 0.25;
+  const MAX_SPEED = 10;
 
-  const speedSlider =
-    document.getElementById("speedSlider");
-
-  const volumeReadout =
-    document.getElementById("volumeReadout");
-
-  const speedReadout =
-    document.getElementById("speedReadout");
-
-  const siteLabel =
-    document.getElementById("siteLabel");
-
-  const resetBtn =
-    document.getElementById("resetBtn");
-
-  let activeTabId = null;
+  const DEFAULTS = {
+    volume: 100,
+    speed: 1,
+  };
 
   /*
    * --------------------------------------------------
-   * UI helpers
+   * Elements
    * --------------------------------------------------
    */
 
-  function fillStop(frac) {
-    return `calc(8px + ${frac} * (100% - 16px))`;
+  const volumeSlider =
+    document.getElementById(
+      "volumeSlider"
+    );
+
+  const volumeReadout =
+    document.getElementById(
+      "volumeReadout"
+    );
+
+  const speedSlider =
+    document.getElementById(
+      "speedSlider"
+    );
+
+  const speedReadout =
+    document.getElementById(
+      "speedReadout"
+    );
+
+  const resetBtn =
+    document.getElementById(
+      "resetBtn"
+    );
+
+  const siteLabel =
+    document.getElementById(
+      "siteLabel"
+    );
+
+  const volumePresets =
+    document.querySelectorAll(
+      '.presets[data-target="volume"] button'
+    );
+
+  const speedPresets =
+    document.querySelectorAll(
+      '.presets[data-target="speed"] button'
+    );
+
+  const stepButtons =
+    document.querySelectorAll(
+      ".step[data-target]"
+    );
+
+  /*
+   * --------------------------------------------------
+   * Current tab
+   * --------------------------------------------------
+   */
+
+  let currentTab = null;
+
+  let currentHost = null;
+
+  let state = {
+    volume:
+      DEFAULTS.volume,
+
+    speed:
+      DEFAULTS.speed,
+  };
+
+  /*
+   * --------------------------------------------------
+   * Value helpers
+   * --------------------------------------------------
+   */
+
+  function clampVolume(value) {
+    value =
+      Number(value);
+
+    if (
+      !Number.isFinite(
+        value
+      )
+    ) {
+      return DEFAULTS.volume;
+    }
+
+    return Math.min(
+      MAX_VOL,
+      Math.max(
+        MIN_VOL,
+        Math.round(value)
+      )
+    );
   }
 
-  function paintFill(
+  function clampSpeed(value) {
+    value =
+      Number(value);
+
+    if (
+      !Number.isFinite(
+        value
+      )
+    ) {
+      return DEFAULTS.speed;
+    }
+
+    return Math.min(
+      MAX_SPEED,
+      Math.max(
+        MIN_SPEED,
+        Math.round(
+          value * 20
+        ) / 20
+      )
+    );
+  }
+
+  function normalizeState(value) {
+    return {
+      volume:
+        clampVolume(
+          value?.volume
+        ),
+
+      speed:
+        clampSpeed(
+          value?.speed
+        ),
+    };
+  }
+
+  function formatSpeed(value) {
+    const number =
+      Number(value);
+
+    if (
+      !Number.isFinite(
+        number
+      )
+    ) {
+      return "1";
+    }
+
+    if (
+      Number.isInteger(
+        number
+      )
+    ) {
+      return String(
+        number
+      );
+    }
+
+    return number
+      .toFixed(2)
+      .replace(
+        /0+$/,
+        ""
+      )
+      .replace(
+        /\.$/,
+        ""
+      );
+  }
+
+  /*
+   * --------------------------------------------------
+   * Slider progress
+   * --------------------------------------------------
+   */
+
+  function updateSliderProgress(
     slider,
-    frac
+    min,
+    max
   ) {
     if (!slider) {
       return;
     }
 
-    const stop =
-      fillStop(frac);
-
-    slider.style.background =
-      `linear-gradient(to right, var(--accent) 0, var(--accent) ${stop}, var(--line) ${stop}, var(--line) 100%)`;
-  }
-
-  function fmtVolume(value) {
-    if (
-      !volumeReadout ||
-      !volumeSlider
-    ) {
-      return;
-    }
-
-    const volume =
-      Math.min(
-        250,
-        Math.max(
-          0,
-          Math.round(
-            Number(value)
-          )
-        )
+    const value =
+      Number(
+        slider.value
       );
 
-    volumeReadout.innerHTML =
-      `${volume}<small>%</small>`;
+    const progress =
+      ((value - min) /
+        (max - min)) *
+      100;
 
-    paintFill(
-      volumeSlider,
-      volume / 250
+    slider.style.setProperty(
+      "--progress",
+      `${progress}%`
     );
-
-    highlightPreset(
-      "volume",
-      volume
-    );
-  }
-
-  function fmtSpeed(value) {
-    if (
-      !speedReadout ||
-      !speedSlider
-    ) {
-      return;
-    }
-
-    const speed =
-      Math.min(
-        10,
-        Math.max(
-          0.25,
-          Math.round(
-            Number(value) * 100
-          ) / 100
-        )
-      );
-
-    speedReadout.innerHTML =
-      `${speed.toFixed(2)}<small>x</small>`;
-
-    paintFill(
-      speedSlider,
-      (speed - 0.25) /
-        (10 - 0.25)
-    );
-
-    highlightPreset(
-      "speed",
-      speed
-    );
-  }
-
-  function highlightPreset(
-    target,
-    value
-  ) {
-    const group =
-      document.querySelector(
-        `.presets[data-target="${target}"]`
-      );
-
-    if (!group) {
-      return;
-    }
-
-    group
-      .querySelectorAll("button")
-      .forEach((btn) => {
-        btn.classList.toggle(
-          "is-active",
-          Math.abs(
-            Number(
-              btn.dataset.value
-            ) - Number(value)
-          ) < 0.001
-        );
-      });
-  }
-
-  function setVolumeUI(value) {
-    if (!volumeSlider) {
-      return;
-    }
-
-    const volume =
-      Math.min(
-        250,
-        Math.max(
-          0,
-          Math.round(
-            Number(value)
-          )
-        )
-      );
-
-    volumeSlider.disabled =
-      false;
-
-    volumeSlider.value =
-      volume;
-
-    fmtVolume(
-      volume
-    );
-  }
-
-  function setSpeedUI(value) {
-    if (!speedSlider) {
-      return;
-    }
-
-    const speed =
-      Math.min(
-        10,
-        Math.max(
-          0.25,
-          Math.round(
-            Number(value) * 100
-          ) / 100
-        )
-      );
-
-    speedSlider.disabled =
-      false;
-
-    speedSlider.value =
-      speed;
-
-    fmtSpeed(
-      speed
-    );
-  }
-
-  function enableControls() {
-    if (volumeSlider) {
-      volumeSlider.disabled =
-        false;
-    }
-
-    if (speedSlider) {
-      speedSlider.disabled =
-        false;
-    }
-
-    if (resetBtn) {
-      resetBtn.disabled =
-        false;
-    }
-
-    document
-      .querySelectorAll(
-        ".step, .presets button"
-      )
-      .forEach((element) => {
-        element.disabled =
-          false;
-      });
   }
 
   /*
    * --------------------------------------------------
-   * Messaging
+   * Hostname
    * --------------------------------------------------
-   *
-   * The popup never depends on a player existing.
-   *
-   * If content.js exists, messages are sent to it.
-   *
-   * If content.js does not exist, the popup still
-   * works normally.
    */
 
-  function send(message) {
-    return new Promise(
-      (resolve) => {
-        if (
-          activeTabId == null
-        ) {
-          resolve(null);
-          return;
-        }
+  function getHostFromUrl(url) {
+    if (!url) {
+      return null;
+    }
 
-        chrome.tabs.sendMessage(
-          activeTabId,
-          message,
-          (response) => {
-            if (
-              chrome.runtime.lastError
-            ) {
-              resolve(null);
-              return;
-            }
+    try {
+      return (
+        new URL(
+          url
+        ).hostname ||
+        null
+      );
+    } catch (error) {
+      return null;
+    }
+  }
 
-            resolve(
-              response ?? null
-            );
-          }
+  function getStorageKey(host) {
+    return `overdrive:site:${host}`;
+  }
+
+  /*
+   * --------------------------------------------------
+   * Chrome storage
+   * --------------------------------------------------
+   */
+
+  async function readSiteSettings() {
+    if (!currentHost) {
+      return {
+        ...DEFAULTS,
+      };
+    }
+
+    try {
+      const key =
+        getStorageKey(
+          currentHost
+        );
+
+      const result =
+        await chrome.storage.local.get(
+          key
+        );
+
+      if (
+        !result ||
+        !result[key]
+      ) {
+        return {
+          ...DEFAULTS,
+        };
+      }
+
+      return normalizeState(
+        result[key]
+      );
+    } catch (error) {
+      return {
+        ...DEFAULTS,
+      };
+    }
+  }
+
+  async function saveSiteSettings() {
+    if (!currentHost) {
+      return;
+    }
+
+    try {
+      const key =
+        getStorageKey(
+          currentHost
+        );
+
+      await chrome.storage.local.set({
+        [key]:
+          normalizeState(
+            state
+          ),
+      });
+    } catch (error) {
+      // Ignore storage errors
+    }
+  }
+
+  /*
+   * --------------------------------------------------
+   * Content script communication
+   * --------------------------------------------------
+   */
+
+  async function sendToContent(message) {
+    if (
+      !currentTab ||
+      typeof currentTab.id !==
+        "number"
+    ) {
+      return null;
+    }
+
+    try {
+      return await chrome.tabs.sendMessage(
+        currentTab.id,
+        message
+      );
+    } catch (error) {
+      /*
+       * Some pages do not allow content scripts
+       *
+       * The setting is still saved in
+       * chrome.storage.local
+       */
+      return null;
+    }
+  }
+
+  /*
+   * --------------------------------------------------
+   * UI
+   * --------------------------------------------------
+   */
+
+  function updateVolumeUI() {
+    if (volumeSlider) {
+      volumeSlider.value =
+        String(
+          state.volume
+        );
+
+      /*
+       * Update the blue portion of the slider
+       */
+      updateSliderProgress(
+        volumeSlider,
+        MIN_VOL,
+        MAX_VOL
+      );
+    }
+
+    if (volumeReadout) {
+      volumeReadout.innerHTML =
+        `${state.volume}<small>%</small>`;
+    }
+
+    volumePresets.forEach(
+      (button) => {
+        const value =
+          Number(
+            button.dataset.value
+          );
+
+        button.classList.toggle(
+          "is-active",
+          value ===
+            state.volume
         );
       }
     );
   }
 
-  async function activateAudio() {
-    await send({
+  function updateSpeedUI() {
+    if (speedSlider) {
+      speedSlider.value =
+        String(
+          state.speed
+        );
+
+      /*
+       * Update the blue portion of the slider
+       */
+      updateSliderProgress(
+        speedSlider,
+        MIN_SPEED,
+        MAX_SPEED
+      );
+    }
+
+    if (speedReadout) {
+      speedReadout.innerHTML =
+        `${formatSpeed(
+          state.speed
+        )}<small>x</small>`;
+    }
+
+    speedPresets.forEach(
+      (button) => {
+        const value =
+          Number(
+            button.dataset.value
+          );
+
+        button.classList.toggle(
+          "is-active",
+          Math.abs(
+            value -
+              state.speed
+          ) <
+            0.001
+        );
+      }
+    );
+  }
+
+  function updateUI() {
+    updateVolumeUI();
+    updateSpeedUI();
+  }
+
+  /*
+   * --------------------------------------------------
+   * Site label
+   * --------------------------------------------------
+   */
+
+  function updateSiteLabel() {
+    if (!siteLabel) {
+      return;
+    }
+
+    siteLabel.textContent =
+      currentHost ||
+      "this page";
+  }
+
+  /*
+   * --------------------------------------------------
+   * Volume
+   * --------------------------------------------------
+   */
+
+  async function setVolume(value) {
+    state.volume =
+      clampVolume(
+        value
+      );
+
+    updateVolumeUI();
+
+    /*
+     * Save as this site's default
+     */
+    await saveSiteSettings();
+
+    /*
+     * Apply immediately to the current page
+     */
+    await sendToContent({
       type:
-        "overdrive:activate",
+        "overdrive:setVolume",
+
+      value:
+        state.volume,
     });
+  }
+
+  /*
+   * --------------------------------------------------
+   * Speed
+   * --------------------------------------------------
+   */
+
+  async function setSpeed(value) {
+    state.speed =
+      clampSpeed(
+        value
+      );
+
+    updateSpeedUI();
+
+    /*
+     * Save as this site's default
+     */
+    await saveSiteSettings();
+
+    /*
+     * Apply immediately to the current page
+     */
+    await sendToContent({
+      type:
+        "overdrive:setSpeed",
+
+      value:
+        state.speed,
+    });
+  }
+
+  /*
+   * --------------------------------------------------
+   * Step buttons
+   * --------------------------------------------------
+   */
+
+  async function changeByStep(
+    target,
+    direction
+  ) {
+    if (
+      target ===
+      "volume"
+    ) {
+      const next =
+        state.volume +
+        direction;
+
+      await setVolume(
+        next
+      );
+
+      return;
+    }
+
+    if (
+      target ===
+      "speed"
+    ) {
+      const next =
+        state.speed +
+        direction * 0.05;
+
+      await setSpeed(
+        next
+      );
+    }
+  }
+
+  /*
+   * --------------------------------------------------
+   * Reset
+   * --------------------------------------------------
+   */
+
+  async function resetSettings() {
+    state = {
+      volume:
+        DEFAULTS.volume,
+
+      speed:
+        DEFAULTS.speed,
+    };
+
+    /*
+     * Reset the site's saved default
+     */
+    await saveSiteSettings();
+
+    /*
+     * Update popup immediately
+     */
+    updateUI();
+
+    /*
+     * Apply to the current page if possible
+     */
+    await sendToContent({
+      type:
+        "overdrive:reset",
+    });
+  }
+
+  /*
+   * --------------------------------------------------
+   * Event listeners
+   * --------------------------------------------------
+   */
+
+  if (volumeSlider) {
+    volumeSlider.addEventListener(
+      "input",
+      () => {
+        setVolume(
+          volumeSlider.value
+        );
+      }
+    );
+  }
+
+  if (speedSlider) {
+    speedSlider.addEventListener(
+      "input",
+      () => {
+        setSpeed(
+          speedSlider.value
+        );
+      }
+    );
+  }
+
+  /*
+   * Volume preset buttons
+   */
+
+  volumePresets.forEach(
+    (button) => {
+      button.addEventListener(
+        "click",
+        () => {
+          setVolume(
+            button.dataset.value
+          );
+        }
+      );
+    }
+  );
+
+  /*
+   * Speed preset buttons
+   */
+
+  speedPresets.forEach(
+    (button) => {
+      button.addEventListener(
+        "click",
+        () => {
+          setSpeed(
+            button.dataset.value
+          );
+        }
+      );
+    }
+  );
+
+  /*
+   * Plus / minus buttons
+   */
+
+  stepButtons.forEach(
+    (button) => {
+      button.addEventListener(
+        "click",
+        () => {
+          const target =
+            button.dataset.target;
+
+          const direction =
+            button.classList.contains(
+              "step--plus"
+            )
+              ? 1
+              : -1;
+
+          changeByStep(
+            target,
+            direction
+          );
+        }
+      );
+    }
+  );
+
+  /*
+   * Reset button
+   */
+
+  if (resetBtn) {
+    resetBtn.addEventListener(
+      "click",
+      () => {
+        resetSettings();
+      }
+    );
   }
 
   /*
@@ -277,419 +683,63 @@
    * --------------------------------------------------
    */
 
-  async function init() {
-    enableControls();
-
-    /*
-     * Set safe UI defaults immediately
-     *
-     * This means the popup never appears disabled
-     * just because the page has no player
-     */
-    setVolumeUI(
-      DEFAULT_VOLUME
-    );
-
-    setSpeedUI(
-      DEFAULT_SPEED
-    );
-
-    const [tab] =
-      await chrome.tabs.query({
-        active: true,
-        currentWindow: true,
-      });
-
-    if (
-      !tab ||
-      tab.id == null
-    ) {
-      if (siteLabel) {
-        siteLabel.textContent =
-          "this page";
-      }
-
-      return;
-    }
-
-    activeTabId =
-      tab.id;
-
-    let host =
-      "this page";
-
+  async function initialize() {
     try {
-      host =
-        new URL(
-          tab.url || ""
-        ).hostname ||
-        "this page";
-    } catch (error) {
-      // Keep "this page"
-    }
+      const tabs =
+        await chrome.tabs.query({
+          active: true,
+          currentWindow: true,
+        });
 
-    if (siteLabel) {
-      siteLabel.textContent =
-        host;
-    }
+      currentTab =
+        tabs?.[0] ||
+        null;
 
-    /*
-     * Ask content.js for the current tab state
-     *
-     * This is optional
-     *
-     * A missing content script must never disable
-     * the popup controls
-     */
-    const state =
-      await send({
+      currentHost =
+        getHostFromUrl(
+          currentTab?.url
+        );
+
+      updateSiteLabel();
+
+      /*
+       * Load this site's saved settings
+       */
+      state =
+        await readSiteSettings();
+
+      updateUI();
+
+      /*
+       * Synchronize the current page
+       *
+       * This also works when content.js has
+       * already initialized itself
+       */
+      await sendToContent({
         type:
-          "overdrive:getState",
+          "overdrive:setVolume",
+
+        value:
+          state.volume,
       });
 
-    enableControls();
+      await sendToContent({
+        type:
+          "overdrive:setSpeed",
 
-    if (!state) {
-      /*
-       * No content script
-       *
-       * Keep the normal UI defaults
-       */
-      setVolumeUI(
-        DEFAULT_VOLUME
-      );
+        value:
+          state.speed,
+      });
+    } catch (error) {
+      state = {
+        ...DEFAULTS,
+      };
 
-      setSpeedUI(
-        DEFAULT_SPEED
-      );
-
-      return;
-    }
-
-    /*
-     * Restore the actual current tab state
-     */
-    if (
-      typeof state.volume ===
-      "number"
-    ) {
-      setVolumeUI(
-        state.volume
-      );
-    }
-
-    if (
-      typeof state.speed ===
-      "number"
-    ) {
-      setSpeedUI(
-        state.speed
-      );
+      updateUI();
+      updateSiteLabel();
     }
   }
 
-  /*
-   * --------------------------------------------------
-   * Volume slider
-   * --------------------------------------------------
-   */
-
-  if (volumeSlider) {
-    volumeSlider.addEventListener(
-      "input",
-      async () => {
-        const value =
-          Number(
-            volumeSlider.value
-          );
-
-        setVolumeUI(
-          value
-        );
-
-        /*
-         * User interaction can unlock Web Audio
-         */
-        await activateAudio();
-
-        /*
-         * Save/apply through content.js
-         */
-        await send({
-          type:
-            "overdrive:setVolume",
-
-          value,
-        });
-      }
-    );
-  }
-
-  /*
-   * --------------------------------------------------
-   * Speed slider
-   * --------------------------------------------------
-   */
-
-  if (speedSlider) {
-    speedSlider.addEventListener(
-      "input",
-      async () => {
-        const value =
-          Number(
-            speedSlider.value
-          );
-
-        setSpeedUI(
-          value
-        );
-
-        /*
-         * Speed itself does not require Web Audio
-         */
-        await send({
-          type:
-            "overdrive:setSpeed",
-
-          value,
-        });
-      }
-    );
-  }
-
-  /*
-   * --------------------------------------------------
-   * +/- buttons
-   * --------------------------------------------------
-   */
-
-  document
-    .querySelectorAll(".step")
-    .forEach((btn) => {
-      btn.addEventListener(
-        "click",
-        async () => {
-          const target =
-            btn.dataset.target;
-
-          const direction =
-            btn.classList.contains(
-              "step--plus"
-            )
-              ? 1
-              : -1;
-
-          /*
-           * Volume
-           */
-          if (
-            target ===
-            "volume"
-          ) {
-            if (!volumeSlider) {
-              return;
-            }
-
-            const value =
-              Math.min(
-                250,
-                Math.max(
-                  0,
-                  Number(
-                    volumeSlider.value
-                  ) +
-                    direction
-                )
-              );
-
-            setVolumeUI(
-              value
-            );
-
-            await activateAudio();
-
-            await send({
-              type:
-                "overdrive:setVolume",
-
-              value,
-            });
-
-            return;
-          }
-
-          /*
-           * Speed
-           */
-          if (!speedSlider) {
-            return;
-          }
-
-          const value =
-            Math.min(
-              10,
-              Math.max(
-                0.25,
-                Math.round(
-                  (
-                    Number(
-                      speedSlider.value
-                    ) +
-                      direction *
-                        0.05
-                  ) *
-                    100
-                ) / 100
-              )
-            );
-
-          setSpeedUI(
-            value
-          );
-
-          await send({
-            type:
-              "overdrive:setSpeed",
-
-            value,
-          });
-        }
-      );
-    });
-
-  /*
-   * --------------------------------------------------
-   * Presets
-   * --------------------------------------------------
-   */
-
-  document
-    .querySelectorAll(
-      ".presets button"
-    )
-    .forEach((btn) => {
-      btn.addEventListener(
-        "click",
-        async () => {
-          const presetGroup =
-            btn.closest(
-              ".presets"
-            );
-
-          if (!presetGroup) {
-            return;
-          }
-
-          const group =
-            presetGroup.dataset
-              .target;
-
-          const value =
-            Number(
-              btn.dataset.value
-            );
-
-          /*
-           * Volume preset
-           */
-          if (
-            group ===
-            "volume"
-          ) {
-            if (!volumeSlider) {
-              return;
-            }
-
-            setVolumeUI(
-              value
-            );
-
-            await activateAudio();
-
-            await send({
-              type:
-                "overdrive:setVolume",
-
-              value,
-            });
-
-            return;
-          }
-
-          /*
-           * Speed preset
-           */
-          if (!speedSlider) {
-            return;
-          }
-
-          setSpeedUI(
-            value
-          );
-
-          await send({
-            type:
-              "overdrive:setSpeed",
-
-            value,
-          });
-        }
-      );
-    });
-
-  /*
-   * --------------------------------------------------
-   * Reset
-   * --------------------------------------------------
-   *
-   * This always resets the popup UI first
-   *
-   * It does not matter whether:
-   *
-   * - a player exists
-   * - content.js exists
-   * - the page supports media
-   * - the current site has a player
-   *
-   * If content.js is available, it also resets
-   * the actual tab state
-   */
-  if (resetBtn) {
-    resetBtn.addEventListener(
-      "click",
-      async () => {
-        /*
-         * Reset UI immediately
-         */
-        setVolumeUI(
-          DEFAULT_VOLUME
-        );
-
-        setSpeedUI(
-          DEFAULT_SPEED
-        );
-
-        enableControls();
-
-        /*
-         * Reset content.js state if available
-         *
-         * No response is required for the UI
-         * because it has already been reset
-         */
-        await send({
-          type:
-            "overdrive:reset",
-        });
-      }
-    );
-  }
-
-  /*
-   * --------------------------------------------------
-   * Start
-   * --------------------------------------------------
-   */
-
-  init();
+  initialize();
 })();
