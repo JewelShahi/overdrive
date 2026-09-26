@@ -21,7 +21,9 @@
   --danger-soft: rgba(239, 91, 91, 0.12);
 }
 
-* { box-sizing: border-box; }
+* {
+  box-sizing: border-box;
+}
 
 body {
   margin: 0;
@@ -30,26 +32,43 @@ body {
   color: var(--text);
   font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
+  border-radius: 12px;
 }
 
 .panel {
   position: relative;
   overflow: hidden;
   background:
-    radial-gradient(140% 90% at 15% 0%, rgba(76, 141, 255, 0.10), transparent 55%),
+    radial-gradient(
+      140% 90% at 15% 0%,
+      rgba(76, 141, 255, 0.10),
+      transparent 55%
+    ),
     var(--bg);
 }
 
 .panel__accent {
   height: 3px;
-  background: linear-gradient(90deg, var(--accent-dim), var(--accent) 40%, var(--accent-2) 75%, var(--accent-dim));
+  background:
+    linear-gradient(
+      90deg,
+      var(--accent-dim),
+      var(--accent) 40%,
+      var(--accent-2) 75%,
+      var(--accent-dim)
+    );
   background-size: 200% 100%;
   animation: sheen 6s linear infinite;
 }
 
 @keyframes sheen {
-  0% { background-position: 0% 0; }
-  100% { background-position: -200% 0; }
+  0% {
+    background-position: 0% 0;
+  }
+
+  100% {
+    background-position: -200% 0;
+  }
 }
 
 .panel__header {
@@ -61,7 +80,11 @@ body {
   border-bottom: 1px solid var(--line-soft);
 }
 
-.brand { display: flex; align-items: center; gap: 10px; }
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
 
 .brand__dial {
   width: 28px;
@@ -69,16 +92,33 @@ body {
   flex: none;
   filter: drop-shadow(0 0 6px var(--accent-glow));
 }
-.brand__face { fill: var(--panel-raised); stroke: var(--accent-dim); stroke-width: 2; }
-.brand__needle { stroke: var(--accent); stroke-width: 2.5; stroke-linecap: round; }
-.brand__hub { fill: var(--accent); }
+
+.brand__face {
+  fill: var(--panel-raised);
+  stroke: var(--accent-dim);
+  stroke-width: 2;
+}
+
+.brand__needle {
+  stroke: var(--accent);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+}
+
+.brand__hub {
+  fill: var(--accent);
+}
 
 .brand__name {
   margin: 0;
   font-size: 14px;
   font-weight: 700;
   letter-spacing: 0.1px;
-  background: linear-gradient(90deg, var(--text), var(--accent-2));
+  background: linear-gradient(
+    90deg,
+    var(--text),
+    var(--accent-2)
+  );
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -94,7 +134,8 @@ body {
   white-space: nowrap;
 }
 
-/* ---------- Status pill: always shows the live player count ---------- */
+
+/* ---------- Status pill ---------- */
 
 .status {
   display: inline-flex;
@@ -109,7 +150,10 @@ body {
   border-radius: 999px;
   padding: 5px 11px 5px 9px;
   white-space: nowrap;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
 }
 
 .status__dot {
@@ -132,34 +176,111 @@ body {
   text-transform: lowercase;
 }
 
+
+/* ---------- Idle / detecting ---------- */
+
 .status.status--idle .status__count,
-.status.status--idle .status__label { color: var(--text-faint); }
+.status.status--idle .status__label {
+  color: var(--text-faint);
+}
+
+.status.status--idle .status__dot {
+  background: var(--text-faint);
+  box-shadow: none;
+  animation: none;
+}
+
+
+/* ---------- Active / player found ---------- */
 
 .status.status--active {
   border-color: rgba(61, 220, 151, 0.35);
   background: var(--success-soft);
 }
+
 .status.status--active .status__dot {
   background: var(--success);
   box-shadow: 0 0 0 3px rgba(61, 220, 151, 0.22);
   animation: pulse 1.8s ease-in-out infinite;
 }
-.status.status--active .status__count { color: var(--success); }
-.status.status--active .status__label { color: var(--success); opacity: 0.85; }
+
+.status.status--active .status__count {
+  color: var(--success);
+}
+
+.status.status--active .status__label {
+  color: var(--success);
+  opacity: 0.85;
+}
+
+
+/* ---------- Warning / unavailable ---------- */
 
 .status.status--warn {
   color: var(--warn);
   border-color: rgba(242, 184, 75, 0.35);
   background: var(--warn-soft);
 }
-.status.status--warn .status__dot { background: var(--warn); }
+
+.status.status--warn .status__dot {
+  background: var(--warn);
+}
+
 .status.status--warn .status__count,
-.status.status--warn .status__label { color: var(--warn); }
+.status.status--warn .status__label {
+  color: var(--warn);
+}
+
+
+/* ---------- Status animation ---------- */
 
 @keyframes pulse {
-  0%, 100% { box-shadow: 0 0 0 3px rgba(61, 220, 151, 0.22); }
-  50% { box-shadow: 0 0 0 5px rgba(61, 220, 151, 0.08); }
+  0%,
+  100% {
+    box-shadow: 0 0 0 3px rgba(61, 220, 151, 0.22);
+  }
+
+  50% {
+    box-shadow: 0 0 0 5px rgba(61, 220, 151, 0.08);
+  }
 }
+
+
+/* ---------- Unsupported / unavailable page message ---------- */
+
+.volume-unavailable {
+  margin: -4px 16px 14px;
+  padding: 9px 11px;
+  border: 1px solid rgba(242, 184, 75, 0.28);
+  border-radius: 8px;
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+
+.volume-unavailable[hidden] {
+  display: none;
+}
+
+.volume-unavailable__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin-right: 5px;
+  vertical-align: -2px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.volume-unavailable__text {
+  color: var(--warn);
+}
+
 
 /* ---------- Modules ---------- */
 
@@ -198,12 +319,30 @@ body {
   filter: drop-shadow(0 0 4px var(--accent-glow));
 }
 
-.icon-volume path:first-child { fill: var(--accent); stroke: none; }
-.icon-volume .wave { fill: none; stroke: var(--accent); opacity: 0.85; }
-.icon-volume .wave--outer { opacity: 0.5; }
+.icon-volume path:first-child {
+  fill: var(--accent);
+  stroke: none;
+}
 
-.icon-speed path { fill: none; stroke: var(--accent); }
-.icon-speed circle { fill: var(--accent); stroke: none; }
+.icon-volume .wave {
+  fill: none;
+  stroke: var(--accent);
+  opacity: 0.85;
+}
+
+.icon-volume .wave--outer {
+  opacity: 0.5;
+}
+
+.icon-speed path {
+  fill: none;
+  stroke: var(--accent);
+}
+
+.icon-speed circle {
+  fill: var(--accent);
+  stroke: none;
+}
 
 .readout {
   font-family: "SF Mono", "Cascadia Code", Consolas, monospace;
@@ -213,15 +352,15 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-.readout small { font-size: 11px; color: var(--accent-dim); margin-left: 1px; font-weight: 600; }
+.readout small {
+  font-size: 11px;
+  color: var(--accent-dim);
+  margin-left: 1px;
+  font-weight: 600;
+}
 
-/* ---------- Fader ----------
-   The +/- buttons and the slider line are both fixed at 26px tall and
-   both start flush with the top of the row (align-items: flex-start),
-   so they always line up with each other — independent of how tall the
-   tick labels underneath grow. Ticks live in their own block below the
-   line, so they can stack into as many rows as needed without ever
-   pulling the buttons out of alignment again. */
+
+/* ---------- Fader ---------- */
 
 .fader {
   display: flex;
@@ -238,7 +377,12 @@ body {
   height: 26px;
   border-radius: 50%;
   border: 1px solid var(--line);
-  background: linear-gradient(180deg, var(--panel-raised-2), var(--panel-raised));
+  background:
+    linear-gradient(
+      180deg,
+      var(--panel-raised-2),
+      var(--panel-raised)
+    );
   color: var(--text);
   font-size: 15px;
   line-height: 1;
@@ -246,20 +390,36 @@ body {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.35);
-  transition: border-color 0.12s ease, color 0.12s ease, box-shadow 0.12s ease, transform 0.12s ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  transition:
+    border-color 0.12s ease,
+    color 0.12s ease,
+    box-shadow 0.12s ease,
+    transform 0.12s ease;
 }
 
-.step--minus { margin-right: -7px; }
-.step--plus  { margin-left: -7px; }
+.step--minus {
+  margin-right: -7px;
+}
+
+.step--plus {
+  margin-left: -7px;
+}
 
 .step:hover {
   border-color: var(--accent);
   color: var(--accent-2);
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
-.step:active { transform: scale(0.92); }
-.step:disabled, .presets button:disabled, input:disabled, .reset:disabled {
+
+.step:active {
+  transform: scale(0.92);
+}
+
+.step:disabled,
+.presets button:disabled,
+input:disabled,
+.reset:disabled {
   opacity: 0.35;
   cursor: not-allowed;
   pointer-events: none;
@@ -270,8 +430,6 @@ body {
   min-width: 0;
 }
 
-/* The line: same fixed height as the +/- buttons, so both are aligned
-   by simply starting at the same y — no fragile centering math. */
 .fader__line {
   position: relative;
   height: 26px;
@@ -317,13 +475,19 @@ input[type="range"]::-webkit-slider-thumb {
   border-radius: 50%;
   background: var(--text);
   border: 3px solid var(--accent);
-  box-shadow: 0 0 0 4px rgba(76, 141, 255, 0.18), 0 1px 3px rgba(0,0,0,0.4);
+  box-shadow:
+    0 0 0 4px rgba(76, 141, 255, 0.18),
+    0 1px 3px rgba(0, 0, 0, 0.4);
   cursor: pointer;
-  transition: box-shadow 0.12s ease, transform 0.12s ease;
+  transition:
+    box-shadow 0.12s ease,
+    transform 0.12s ease;
 }
 
 input[type="range"]:active::-webkit-slider-thumb {
-  box-shadow: 0 0 0 6px rgba(76, 141, 255, 0.25), 0 1px 3px rgba(0,0,0,0.4);
+  box-shadow:
+    0 0 0 6px rgba(76, 141, 255, 0.25),
+    0 1px 3px rgba(0, 0, 0, 0.4);
   transform: scale(1.05);
 }
 
@@ -339,8 +503,6 @@ input[type="range"]::-moz-range-progress {
   background: var(--accent);
 }
 
-/* Firefox's thumb is set to the same 16px diameter as WebKit's so the
-   calc(8px + frac * (100% - 16px)) alignment math is correct in both. */
 input[type="range"]::-moz-range-thumb {
   width: 16px;
   height: 16px;
@@ -351,10 +513,9 @@ input[type="range"]::-moz-range-thumb {
   box-sizing: border-box;
 }
 
-/* Short reference lines at the key values (0.5/1/2/4/8/10 on speed).
-   Same calc(8px + frac * (100% - 16px)) formula as the thumb, the
-   default marker, and the text labels below — one formula, used
-   everywhere, so nothing can drift out of alignment with anything else. */
+
+/* ---------- Fader marks ---------- */
+
 .fader__marks {
   position: relative;
   height: 6px;
@@ -366,13 +527,14 @@ input[type="range"]::-moz-range-thumb {
   top: 0;
   width: 1px;
   height: 6px;
-  background: var(--line);
+  background: var(--text-faint);
+  opacity: 0.5;
   transform: translateX(-50%);
 }
 
-/* Ticks are positioned with calc(8px + frac * (100% - 16px)) — exactly
-   how the browser insets the native thumb by its own radius from each
-   edge — so a label always sits under the real thumb position. */
+
+/* ---------- Fader tick labels ---------- */
+
 .fader__ticks {
   position: relative;
   height: 13px;
@@ -389,33 +551,28 @@ input[type="range"]::-moz-range-thumb {
   white-space: nowrap;
 }
 
-.fader__ticks span:first-child { transform: translateX(0); }
-.fader__ticks span:last-child { transform: translateX(-100%); }
-
-.fader__tick--native { color: var(--accent-2); font-weight: 700; }
-
-/* Marks: faint guide lines at the key values. */
-.fader__marks span {
-  position: absolute;
-  top: 0;
-  width: 1px;
-  height: 6px;
-  background: var(--text-faint);
-  opacity: 0.5;
-  transform: translateX(-50%);
+.fader__ticks span:first-child {
+  transform: translateX(0);
 }
 
-/* Speed labels: TRUE scale positions, same calc() as the marks above
-   them and the thumb itself — one formula everywhere, so label, mark
-   and thumb can never disagree. The trimmed set (0.5/1/1.5/2/4/8/10)
-   has ~5px clearance between neighbors even in the crowded left end,
-   so all labels fit center-anchored on a single row. This override
-   wins over the base first/last-child edge anchoring (higher specificity),
-   which is required at the left end: left-anchoring "0.5" would push it
-   into "1"'s position. */
+.fader__ticks span:last-child {
+  transform: translateX(-100%);
+}
+
+.fader__tick--native {
+  color: var(--accent-2);
+  font-weight: 700;
+}
+
+
+/* ---------- Speed tick alignment ---------- */
+
 section[data-module="speed"] .fader__ticks span {
   transform: translateX(-50%);
 }
+
+
+/* ---------- Presets ---------- */
 
 .presets {
   display: flex;
@@ -435,7 +592,11 @@ section[data-module="speed"] .fader__ticks span {
   line-height: 1;
   text-align: center;
   cursor: pointer;
-  transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease, transform 0.12s ease;
+  transition:
+    border-color 0.12s ease,
+    color 0.12s ease,
+    background 0.12s ease,
+    transform 0.12s ease;
 }
 
 .presets button:hover {
@@ -443,7 +604,10 @@ section[data-module="speed"] .fader__ticks span {
   color: var(--accent-2);
   background: var(--accent-soft);
 }
-.presets button:active { transform: translateY(1px); }
+
+.presets button:active {
+  transform: translateY(1px);
+}
 
 .presets button.is-active {
   border-color: var(--accent);
@@ -452,21 +616,29 @@ section[data-module="speed"] .fader__ticks span {
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
-/* Eight buttons in the same row width as before need a bit less
-   breathing room per button than the original five did. */
+
+/* ---------- Speed presets ---------- */
+
 .presets--speed {
   gap: 4px;
 }
+
 .presets--speed button {
   padding: 7px 0;
   font-size: 10px;
 }
 
+
+/* ---------- Footer ---------- */
+
 .panel__footer {
-  padding: 13px 16px 16px;
   display: flex;
+  flex-direction: row;
   align-items: center;
-  justify-content: space-between;
+  justify-content: space-evenly;
+  text-align: center;
+  gap: 5px;
+  padding: 10px 0px;
 }
 
 .reset {
@@ -483,7 +655,9 @@ section[data-module="speed"] .fader__ticks span {
   font-weight: 600;
   line-height: 1;
   cursor: pointer;
-  transition: background 0.12s ease, transform 0.12s ease;
+  transition:
+    background 0.12s ease,
+    transform 0.12s ease;
 }
 
 .reset__icon {
@@ -496,11 +670,43 @@ section[data-module="speed"] .fader__ticks span {
   stroke-linejoin: round;
 }
 
-.reset:hover { background: rgba(239, 91, 91, 0.2); }
-.reset:active { transform: translateY(1px); }
+.reset:hover {
+  background: rgba(239, 91, 91, 0.2);
+}
+
+.reset:active {
+  transform: translateY(1px);
+}
 
 .hint {
   margin: 0;
   font-size: 10.5px;
   color: var(--text-faint);
+}
+
+.creator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1;
+  text-decoration: none;
+  opacity: 0.72;
+  transition:
+    color 0.15s ease,
+    opacity 0.15s ease;
+}
+
+.creator:hover {
+  color: var(--text);
+  opacity: 1;
+}
+
+.creator__icon {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
 }

@@ -1,24 +1,3 @@
-// Overdrive — Volume & Speed Booster
-// Per-page volume/speed control for <video>/<audio> elements.
-//
-// Volume behavior:
-// - The website/player keeps its own native volume.
-// - Overdrive adds a Web Audio gain multiplier on top.
-// - Example:
-//     YouTube 5%   + Overdrive 250% = 12.5%
-//     YouTube 50%  + Overdrive 200% = 100%
-//     YouTube 100% + Overdrive 250% = 250%
-//
-// Storage:
-// - Volume and speed are saved in localStorage per hostname.
-// - Reloading the page keeps the settings.
-// - Reset removes the saved settings for that hostname.
-//
-// Important:
-// - The Web Audio graph is created once per media element.
-// - Gain is always set absolutely, never multiplied repeatedly.
-// - Pausing/unpausing does not multiply the gain again.
-
 (() => {
   const MIN_VOL = 0;
   const MAX_VOL = 250;
@@ -26,416 +5,533 @@
   const MIN_SPEED = 0.25;
   const MAX_SPEED = 10;
 
-  const DEFAULTS = Object.freeze({
+  const DEFAULTS = {
     volume: 100,
     speed: 1,
-  });
+  };
 
-  // ------------------------------------------------------------
-  // State
-  // ------------------------------------------------------------
+  const host = location.hostname;
 
-  let state = { ...DEFAULTS };
+  /*
+   * Persistent site default
+   *
+   * Example:
+   * overdrive:youtube.com
+   *
+   * This is only the fallback for a new tab
+   */
+  const siteStorageKey =
+    `overdrive:${host}`;
+
+  /*
+   * Current tab's settings
+   *
+   * This is intentionally kept in memory
+   *
+   * Refreshing a page does not destroy the
+   * extension's session storage, so the tab
+   * can restore its own settings
+   */
+  let state = {
+    volume: DEFAULTS.volume,
+    speed: DEFAULTS.speed,
+  };
+
+  let initialized = false;
 
   let audioCtx = null;
 
-  // Prevents the same media element from getting another
-  // MediaElementSource/GainNode chain.
+  /*
+   * Each media element gets exactly one:
+   *
+   * MediaElementSource -> GainNode -> Destination
+   *
+   * WeakMap prevents duplicate audio rigs
+   */
   const rigged = new WeakMap();
 
-  // ------------------------------------------------------------
-  // Helpers
-  // ------------------------------------------------------------
+  /*
+   * --------------------------------------------------
+   * Storage helpers
+   * --------------------------------------------------
+   */
 
-  function clamp(value, min, max) {
-    return Math.min(max, Math.max(min, value));
-  }
-
-  // Store settings separately for each website.
-  //
-  // Example:
-  //   overdrive:youtube.com
-  //   overdrive:netflix.com
-  //
-  function storageKey() {
-    return `overdrive:${location.hostname || "local-file"}`;
-  }
-
-  function loadState() {
+  function readSiteDefaults() {
     try {
-      const saved = localStorage.getItem(
-        storageKey()
-      );
+      const raw =
+        localStorage.getItem(
+          siteStorageKey
+        );
 
-      if (!saved) {
-        return { ...DEFAULTS };
+      if (!raw) {
+        return {
+          ...DEFAULTS,
+        };
       }
 
-      const parsed = JSON.parse(saved);
-
-      const volume = Number(parsed.volume);
-      const speed = Number(parsed.speed);
+      const saved =
+        JSON.parse(raw);
 
       return {
-        volume: Number.isFinite(volume)
-          ? clamp(
-              Math.round(volume),
-              MIN_VOL,
-              MAX_VOL
-            )
-          : DEFAULTS.volume,
+        volume:
+          clampVolume(
+            saved.volume
+          ),
 
-        speed: Number.isFinite(speed)
-          ? clamp(
-              Math.round(speed * 100) / 100,
-              MIN_SPEED,
-              MAX_SPEED
-            )
-          : DEFAULTS.speed,
+        speed:
+          clampSpeed(
+            saved.speed
+          ),
       };
     } catch (error) {
-      return { ...DEFAULTS };
+      return {
+        ...DEFAULTS,
+      };
     }
   }
 
-  function saveState() {
+  function writeSiteDefaults() {
     try {
       localStorage.setItem(
-        storageKey(),
-        JSON.stringify(state)
+        siteStorageKey,
+        JSON.stringify({
+          volume: state.volume,
+          speed: state.speed,
+        })
       );
     } catch (error) {
-      // Storage may be unavailable on some pages.
-      // Continue using in-memory state.
+      /*
+       * Ignore storage errors
+       */
     }
   }
 
-  function removeSavedState() {
+  /*
+   * --------------------------------------------------
+   * Session storage
+   * --------------------------------------------------
+   *
+   * chrome.storage.session survives page navigation
+   * and refreshes while the browser is running
+   *
+   * It is cleared when Chrome is closed/restarted
+   *
+   * The key includes the current tab ID so each
+   * tab gets independent settings
+   */
+
+  function getSessionKey(tabId) {
+    return `tab:${tabId}`;
+  }
+
+  async function readTabState() {
+    /*
+     * Content scripts normally don't have access to
+     * the tab ID directly, so ask the background/service
+     * worker for it
+     */
     try {
-      localStorage.removeItem(
-        storageKey()
+      const response =
+        await chrome.runtime.sendMessage({
+          type:
+            "overdrive:getTabId",
+        });
+
+      if (
+        !response ||
+        typeof response.tabId !==
+          "number"
+      ) {
+        return false;
+      }
+
+      const key =
+        getSessionKey(
+          response.tabId
+        );
+
+      const result =
+        await chrome.storage.session.get(
+          key
+        );
+
+      if (
+        result &&
+        result[key]
+      ) {
+        const saved =
+          result[key];
+
+        state = {
+          volume:
+            clampVolume(
+              saved.volume
+            ),
+
+          speed:
+            clampSpeed(
+              saved.speed
+            ),
+        };
+
+        return true;
+      }
+
+      /*
+       * No tab-specific settings yet
+       *
+       * Start from this site's default
+       */
+      state =
+        readSiteDefaults();
+
+      await writeTabState(
+        response.tabId
       );
+
+      return true;
     } catch (error) {
-      // Ignore storage errors.
+      /*
+       * If session storage or the service worker
+       * is unavailable, fall back to site defaults
+       */
+      state =
+        readSiteDefaults();
+
+      return false;
     }
   }
 
-  // ------------------------------------------------------------
-  // AudioContext
-  // ------------------------------------------------------------
+  async function writeTabState(tabId) {
+    if (
+      typeof tabId !==
+      "number"
+    ) {
+      return;
+    }
+
+    try {
+      const key =
+        getSessionKey(tabId);
+
+      await chrome.storage.session.set({
+        [key]: {
+          volume:
+            state.volume,
+
+          speed:
+            state.speed,
+        },
+      });
+    } catch (error) {
+      /*
+       * Ignore session-storage errors
+       */
+    }
+  }
+
+  async function getCurrentTabId() {
+    try {
+      const response =
+        await chrome.runtime.sendMessage({
+          type:
+            "overdrive:getTabId",
+        });
+
+      if (
+        response &&
+        typeof response.tabId ===
+          "number"
+      ) {
+        return response.tabId;
+      }
+    } catch (error) {
+      // Ignore.
+    }
+
+    return null;
+  }
+
+  /*
+   * --------------------------------------------------
+   * Value helpers
+   * --------------------------------------------------
+   */
+
+  function clampVolume(value) {
+    value =
+      Number(value);
+
+    if (
+      !Number.isFinite(value)
+    ) {
+      return DEFAULTS.volume;
+    }
+
+    return Math.min(
+      MAX_VOL,
+      Math.max(
+        MIN_VOL,
+        Math.round(value)
+      )
+    );
+  }
+
+  function clampSpeed(value) {
+    value =
+      Number(value);
+
+    if (
+      !Number.isFinite(value)
+    ) {
+      return DEFAULTS.speed;
+    }
+
+    return Math.min(
+      MAX_SPEED,
+      Math.max(
+        MIN_SPEED,
+        Math.round(
+          value * 100
+        ) / 100
+      )
+    );
+  }
+
+  /*
+   * --------------------------------------------------
+   * Web Audio
+   * --------------------------------------------------
+   */
 
   function getAudioContext() {
     if (!audioCtx) {
-      const AC =
-        window.AudioContext ||
-        window.webkitAudioContext;
-
-      if (!AC) {
-        return null;
-      }
-
-      try {
-        audioCtx = new AC();
-      } catch (error) {
-        audioCtx = null;
-        return null;
-      }
+      audioCtx =
+        new AudioContext();
     }
 
-    // Browsers commonly suspend AudioContext until
-    // a user gesture.
-    //
-    // Resuming does NOT change the gain value.
-    if (audioCtx.state === "suspended") {
-      audioCtx.resume().catch(() => {});
+    if (
+      audioCtx.state ===
+      "suspended"
+    ) {
+      audioCtx.resume().catch(
+        () => {}
+      );
     }
 
     return audioCtx;
   }
 
-  // ------------------------------------------------------------
-  // Create Web Audio graph
-  // ------------------------------------------------------------
-
   function rig(el) {
-    let entry = rigged.get(el);
-
-    if (entry) {
-      return entry;
+    if (
+      !el ||
+      rigged.has(el)
+    ) {
+      return;
     }
 
-    const ctx = getAudioContext();
-
-    if (!ctx) {
-      entry = {
-        source: null,
-        gain: null,
-        usesWebAudio: false,
-      };
-
-      rigged.set(el, entry);
-
-      return entry;
-    }
-
+    /*
+     * Some media elements may not be ready
+     * to be connected yet
+     */
     try {
+      const ctx =
+        getAudioContext();
+
       const source =
-        ctx.createMediaElementSource(el);
+        ctx.createMediaElementSource(
+          el
+        );
 
       const gain =
         ctx.createGain();
 
-      // Audio path:
-      //
-      // <video>/<audio>
-      //       ↓
-      //    GainNode
-      //       ↓
-      //   speakers
-      //
       source.connect(gain);
-      gain.connect(ctx.destination);
 
-      entry = {
-        source,
-        gain,
-        usesWebAudio: true,
-      };
-    } catch (error) {
-      // The media element may already belong to
-      // another Web Audio graph.
-      //
-      // Fall back to native volume.
-      entry = {
-        source: null,
-        gain: null,
-        usesWebAudio: false,
-      };
-    }
+      gain.connect(
+        ctx.destination
+      );
 
-    rigged.set(el, entry);
-
-    // ----------------------------------------------------------
-    // Play
-    // ----------------------------------------------------------
-    //
-    // IMPORTANT:
-    // Do not change volume here.
-    //
-    // Playing/pausing should not multiply the gain again.
-
-    el.addEventListener(
-      "play",
-      () => {
-        getAudioContext();
-      },
-      { passive: true }
-    );
-
-    // ----------------------------------------------------------
-    // Playback speed
-    // ----------------------------------------------------------
-
-    el.addEventListener(
-      "ratechange",
-      () => {
-        if (
-          Number.isFinite(state.speed) &&
-          Math.abs(
-            el.playbackRate -
-              state.speed
-          ) > 0.01
-        ) {
-          try {
-            el.playbackRate =
-              state.speed;
-          } catch (error) {
-            // Some players may reject the change.
-          }
+      rigged.set(
+        el,
+        {
+          source,
+          gain,
         }
-      },
-      { passive: true }
-    );
+      );
 
-    // ----------------------------------------------------------
-    // IMPORTANT:
-    //
-    // There is intentionally NO volumechange handler here.
-    //
-    // We do NOT do this:
-    //
-    //     el.volume = 1;
-    //
-    // The website is allowed to control its own volume.
-    //
-    // Example:
-    //
-    //     YouTube = 5%
-    //     Overdrive = 250%
-    //
-    //     0.05 × 2.5 = 0.125
-    //
-    //     Effective volume = 12.5%
-    //
-    // ----------------------------------------------------------
-
-    return entry;
-  }
-
-  // ------------------------------------------------------------
-  // Apply volume
-  // ------------------------------------------------------------
-
-  function applyVolume(el) {
-    if (
-      !el ||
-      (
-        el.tagName !== "VIDEO" &&
-        el.tagName !== "AUDIO"
-      )
-    ) {
-      return;
-    }
-
-    const entry = rig(el);
-
-    if (
-      entry.usesWebAudio &&
-      entry.gain
-    ) {
-      // --------------------------------------------------------
-      // IMPORTANT:
-      //
-      // This is an absolute gain value.
-      //
-      // 100% = 1.0x
-      // 150% = 1.5x
-      // 200% = 2.0x
-      // 250% = 2.5x
-      //
-      // We DO NOT change el.volume.
-      //
-      // The website's volume remains independent.
-      // --------------------------------------------------------
-
-      const gainValue =
+      /*
+       * Apply current settings immediately
+       */
+      gain.gain.value =
         state.volume / 100;
 
-      entry.gain.gain.setValueAtTime(
-        gainValue,
-        entry.gain.context.currentTime
-      );
-    } else {
-      // --------------------------------------------------------
-      // Fallback if Web Audio isn't available.
-      //
-      // Native HTML media volume cannot exceed 100%.
-      // --------------------------------------------------------
+      el.playbackRate =
+        state.speed;
 
-      el.volume = clamp(
-        state.volume / 100,
-        0,
-        1
-      );
-    }
-  }
-
-  // ------------------------------------------------------------
-  // Apply playback speed
-  // ------------------------------------------------------------
-
-  function applySpeed(el) {
-    if (
-      !el ||
-      (
-        el.tagName !== "VIDEO" &&
-        el.tagName !== "AUDIO"
-      )
-    ) {
-      return;
-    }
-
-    try {
-      if (
-        Math.abs(
-          el.playbackRate -
-            state.speed
-        ) > 0.01
-      ) {
-        el.playbackRate =
-          state.speed;
-      }
-
-      if (
-        Math.abs(
-          el.defaultPlaybackRate -
-            state.speed
-        ) > 0.01
-      ) {
-        el.defaultPlaybackRate =
-          state.speed;
-      }
+      el.defaultPlaybackRate =
+        state.speed;
     } catch (error) {
-      // Ignore media elements that reject
-      // playback-rate changes.
+      /*
+       * MediaElementSource can fail for certain
+       * protected/cross-origin media
+       *
+       * Leave the element alone in that case
+       */
     }
   }
 
-  // ------------------------------------------------------------
-  // Apply everything to one media element
-  // ------------------------------------------------------------
+  /*
+   * --------------------------------------------------
+   * Media helpers
+   * --------------------------------------------------
+   */
 
-  function applyTo(el) {
-    if (
-      !el ||
-      (
-        el.tagName !== "VIDEO" &&
-        el.tagName !== "AUDIO"
-      )
-    ) {
-      return;
-    }
-
-    applyVolume(el);
-    applySpeed(el);
-  }
-
-  // ------------------------------------------------------------
-  // Find all media
-  // ------------------------------------------------------------
-
-  function allMedia(root = document) {
+  function allMedia() {
     return Array.from(
-      root.querySelectorAll(
+      document.querySelectorAll(
         "video, audio"
       )
     );
   }
 
+  function applyVolume(el) {
+    const connection =
+      rigged.get(el);
+
+    if (connection) {
+      /*
+       * Overdrive is an independent multiplier
+       *
+       * 100% = 1.0x
+       * 150% = 1.5x
+       * 200% = 2.0x
+       * 250% = 2.5x
+       */
+      connection.gain.gain.value =
+        state.volume / 100;
+
+      return;
+    }
+
+    /*
+     * Fallback if Web Audio could not be attached
+     *
+     * Native volume cannot exceed 100%
+     */
+    el.volume =
+      Math.min(
+        1,
+        state.volume / 100
+      );
+  }
+
+  function applySpeed(el) {
+    try {
+      el.playbackRate =
+        state.speed;
+
+      el.defaultPlaybackRate =
+        state.speed;
+    } catch (error) {
+      // Ignore media errors
+    }
+  }
+
+  function applyToMedia(el) {
+    if (!el) {
+      return;
+    }
+
+    rig(el);
+
+    applyVolume(el);
+    applySpeed(el);
+  }
+
   function applyAll() {
     allMedia().forEach(
-      applyTo
+      applyToMedia
     );
   }
 
-  // ------------------------------------------------------------
-  // Watch for dynamically-created media
-  // ------------------------------------------------------------
-  //
-  // Useful for YouTube SPA navigation,
-  // lazy-loaded videos, ads, etc.
-  //
+  /*
+   * --------------------------------------------------
+   * Save current tab state
+   * --------------------------------------------------
+   */
+
+  async function saveCurrentTabState() {
+    const tabId =
+      await getCurrentTabId();
+
+    if (
+      tabId === null
+    ) {
+      return;
+    }
+
+    await writeTabState(
+      tabId
+    );
+  }
+
+  /*
+   * --------------------------------------------------
+   * Initialization
+   * --------------------------------------------------
+   */
+
+  async function initialize() {
+    if (initialized) {
+      return;
+    }
+
+    initialized = true;
+
+    /*
+     * Restore this tab's previous settings
+     *
+     * If none exist, use this site's default
+     */
+    await readTabState();
+
+    /*
+     * Find media that already exists
+     */
+    applyAll();
+  }
+
+  /*
+   * --------------------------------------------------
+   * Mutation observer
+   * --------------------------------------------------
+   *
+   * YouTube constantly creates/removes media elements
+   *
+   * We do NOT reset settings when that happens
+   *
+   * Therefore changing:
+   *
+   * /watch?v=AAAA
+   *
+   * to:
+   *
+   * /watch?v=BBBB
+   *
+   * keeps the same tab state
+   */
 
   const observer =
     new MutationObserver(
       (mutations) => {
-        let foundMedia = false;
-
         for (
-          const mutation of mutations
+          const mutation
+          of mutations
         ) {
           for (
-            const node of mutation.addedNodes
+            const node
+            of mutation.addedNodes
           ) {
             if (
               node.nodeType !==
@@ -444,169 +540,187 @@
               continue;
             }
 
+            /*
+             * The node itself may be media
+             */
             if (
               node.matches?.(
                 "video, audio"
               )
             ) {
-              foundMedia = true;
-              continue;
+              applyToMedia(
+                node
+              );
             }
 
-            if (
-              node.querySelector?.(
+            /*
+             * Or media may be inside it
+             */
+            node
+              .querySelectorAll?.(
                 "video, audio"
               )
-            ) {
-              foundMedia = true;
-            }
+              .forEach(
+                applyToMedia
+              );
           }
-        }
-
-        if (foundMedia) {
-          applyAll();
         }
       }
     );
 
-  function startObserving() {
-    const root =
-      document.documentElement ||
-      document;
-
-    observer.observe(root, {
+  observer.observe(
+    document.documentElement ||
+      document,
+    {
       childList: true,
       subtree: true,
-    });
-  }
+    }
+  );
 
-  // ------------------------------------------------------------
-  // Messages from popup
-  // ------------------------------------------------------------
+  /*
+   * Safety scan
+   *
+   * This catches media elements that YouTube creates
+   * in unusual ways that MutationObserver may miss
+   */
+  setInterval(() => {
+    applyAll();
+  }, 1000);
+
+  /*
+   * --------------------------------------------------
+   * Messages from popup
+   * --------------------------------------------------
+   */
 
   chrome.runtime.onMessage.addListener(
     (
-      msg,
+      message,
       sender,
       sendResponse
     ) => {
       if (
-        !msg ||
-        !msg.type
+        !message ||
+        !message.type
       ) {
         return;
       }
 
-      // --------------------------------------------------------
-      // Get current state
-      // --------------------------------------------------------
-
+      /*
+       * Get current state
+       */
       if (
-        msg.type ===
+        message.type ===
         "overdrive:getState"
       ) {
         sendResponse({
-          hostname:
-            location.hostname ||
-            "local-file",
-
           volume:
             state.volume,
 
           speed:
             state.speed,
-
-          mediaCount:
-            allMedia().length,
         });
 
-        return true;
+        return;
       }
 
-      // --------------------------------------------------------
-      // Set volume
-      // --------------------------------------------------------
-
+      /*
+       * Set volume
+       */
       if (
-        msg.type ===
+        message.type ===
         "overdrive:setVolume"
       ) {
         state.volume =
-          clamp(
-            Math.round(
-              Number(msg.value)
-            ),
-            MIN_VOL,
-            MAX_VOL
+          clampVolume(
+            message.value
           );
 
-        // Save per website.
-        saveState();
-
-        // Apply immediately.
         applyAll();
 
+        /*
+         * Save as this tab's state
+         */
+        saveCurrentTabState();
+
+        /*
+         * Also update this site's default
+         *
+         * This means a newly opened tab can use
+         * the most recently selected site setting
+         */
+        writeSiteDefaults();
+
         sendResponse({
-          ok: true,
           volume:
             state.volume,
-        });
 
-        return true;
-      }
-
-      // --------------------------------------------------------
-      // Set speed
-      // --------------------------------------------------------
-
-      if (
-        msg.type ===
-        "overdrive:setSpeed"
-      ) {
-        state.speed =
-          clamp(
-            Math.round(
-              Number(msg.value) *
-                100
-            ) / 100,
-            MIN_SPEED,
-            MAX_SPEED
-          );
-
-        // Save per website.
-        saveState();
-
-        // Apply immediately.
-        applyAll();
-
-        sendResponse({
-          ok: true,
           speed:
             state.speed,
         });
 
-        return true;
+        return;
       }
 
-      // --------------------------------------------------------
-      // Reset
-      // --------------------------------------------------------
-
+      /*
+       * Set speed
+       */
       if (
-        msg.type ===
+        message.type ===
+        "overdrive:setSpeed"
+      ) {
+        state.speed =
+          clampSpeed(
+            message.value
+          );
+
+        applyAll();
+
+        /*
+         * Save as this tab's state
+         */
+        saveCurrentTabState();
+
+        /*
+         * Update site default
+         */
+        writeSiteDefaults();
+
+        sendResponse({
+          volume:
+            state.volume,
+
+          speed:
+            state.speed,
+        });
+
+        return;
+      }
+
+      /*
+       * Reset this tab
+       *
+       * Reset means return the current tab
+       * to the site's normal defaults
+       */
+      if (
+        message.type ===
         "overdrive:reset"
       ) {
         state = {
           ...DEFAULTS,
         };
 
-        // Delete saved settings for this website.
-        removeSavedState();
-
         applyAll();
 
+        saveCurrentTabState();
+
+        /*
+         * Reset the site's default too
+         */
+        writeSiteDefaults();
+
         sendResponse({
-          ok: true,
           volume:
             state.volume,
 
@@ -614,85 +728,13 @@
             state.speed,
         });
 
-        return true;
+        return;
       }
     }
   );
 
-  // ------------------------------------------------------------
-  // Prime AudioContext after user gesture
-  // ------------------------------------------------------------
-
-  function primeAudioOnGesture() {
-    const prime = () => {
-      getAudioContext();
-
-      // Make sure any media that appeared before
-      // the gesture gets the current gain.
-      applyAll();
-    };
-
-    [
-      "pointerdown",
-      "keydown",
-      "touchstart",
-    ].forEach(
-      (eventName) => {
-        document.addEventListener(
-          eventName,
-          prime,
-          {
-            once: true,
-            capture: true,
-            passive: true,
-          }
-        );
-      }
-    );
-  }
-
-  // ------------------------------------------------------------
-  // Init
-  // ------------------------------------------------------------
-
-  function init() {
-    // Load saved settings for this website.
-    //
-    // Example:
-    // youtube.com -> 250%, 1.5x
-    // another.com -> 150%, 1x
-    //
-    state = loadState();
-
-    applyAll();
-
-    startObserving();
-
-    primeAudioOnGesture();
-
-    document.addEventListener(
-      "DOMContentLoaded",
-      applyAll,
-      { once: true }
-    );
-
-    window.addEventListener(
-      "load",
-      applyAll,
-      { once: true }
-    );
-  }
-
-  if (
-    document.readyState ===
-    "loading"
-  ) {
-    document.addEventListener(
-      "DOMContentLoaded",
-      init,
-      { once: true }
-    );
-  } else {
-    init();
-  }
+  /*
+   * Initialize
+   */
+  initialize();
 })();
