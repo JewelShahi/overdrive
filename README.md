@@ -18,7 +18,7 @@ that uses a standard HTML `<video>`/`<audio>` element.
   to look smooth — that's a browser/codec limit, not something an extension
   can get around.
 - Settings are saved **per site** (per hostname) via `chrome.storage.local`,
-  so YouTube and Pornhub can each remember their own volume/speed.
+  so YouTube can each remember their own volume/speed.
 - A `MutationObserver` watches the page for players that load in later
   (YouTube's SPA navigation, lazy-loaded embeds, etc.) and wires them up
   automatically.
